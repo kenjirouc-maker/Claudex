@@ -1252,7 +1252,7 @@ $('#mp-back').onclick=()=>{$('#maps').classList.remove('on');menu.classList.add(
 const boxCls=b=>b==='catcher'?'netbox':b==='puncher'?'ringbox':'rambox';
 /* Tracks every registered account saved on this device. Each tab ranks by a different stat; tap a player for their full progress. */
 /* ---- online leaderboard (Firebase Realtime Database over plain HTTPS). Paste your database URL below, e.g. 'https://my-idk-default-rtdb.firebaseio.com'. Empty = this-device-only. ---- */
-const CLOUD='';
+const CLOUD='https://idk123-14320-default-rtdb.firebaseio.com';
 let cloudRows=[],cloudPushT=0,cloudOk=null;
 const cKey=n=>encodeURIComponent(n.toLowerCase()).replace(/\./g,'%2E');
 function cloudPush(force){if(!CLOUD||S.user==='Guest'||typeof fetch!=='function')return;const n=Date.now();if(!force&&n-cloudPushT<20000)return;cloudPushT=n;
