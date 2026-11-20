@@ -320,7 +320,7 @@ h1::after{content:"";display:block;width:132px;height:10px;margin:8px auto 0;bac
 <section class="screen" id="maps"><div class="lobby"><div class="bar"><button class="mode" id="mp-back">&#8249; Back</button><b class="ttl">Maps</b><span style="width:84px"></span></div>
 <div class="mp-list" id="mp-list"></div></div></section>
 <section class="screen" id="lboard"><div class="lobby"><div class="bar"><button class="mode" id="lbk">&#8249; Back</button><b class="ttl">Leaderboard</b><span style="width:84px"></span></div>
-<div class="lb-tabs" id="lb-tabs"></div><div class="lbl-list" id="lbl-list"></div><div class="lbl-note">Tracks the progress of every registered account on this device. Pick a tab to rank by medals, wins, flag captures or survival, and tap a player for their full stats. Guests and bots are not counted. Updates live.</div></div></section>
+<div class="lb-tabs" id="lb-tabs"></div><div class="lbl-list" id="lbl-list"></div><div class="lbl-note" id="lb-note">Tracks the progress of every registered account on this device. Pick a tab to rank by medals, wins, flag captures or survival, and tap a player for their full stats. Guests and bots are not counted. Updates live.</div></div></section>
 <!-- Game over -->
 <section class="screen" id="over"><div class="sheet"><h1 id="ot" style="font-size:64px"></h1><p class="sub" id="os"></p><p class="rw" id="rw"></p><button class="go" id="again"></button><br><button class="ghost" id="home">Back to menu</button></div></section>
 </div>
@@ -383,7 +383,7 @@ function persist(){const j=JSON.stringify(DB),out=cs(j)+'|'+j;
 /* other tabs may have registered new accounts or earned progress: pull those in before every write, so a stale tab can never wipe an account off the leaderboard */
 function syncDB(){if(!canLS)return;try{const o=parseDB(localStorage.getItem(KEY));if(!o)return;const me=S.user==='Guest'?'':S.user.toLowerCase();
  for(const k in o.acc)if(k!==me)DB.acc[k]=o.acc[k];if(me&&o.guest)DB.guest=o.guest}catch(e){}}
-function save(){if(!canLS)return;try{syncDB();DB.mute=!!S.mute;DB.last=S.user==='Guest'?'guest':S.user.toLowerCase();const d=JSON.parse(JSON.stringify(pickK(S)));
+function save(){if(!canLS)return;try{syncDB();cloudPush();DB.mute=!!S.mute;DB.last=S.user==='Guest'?'guest':S.user.toLowerCase();const d=JSON.parse(JSON.stringify(pickK(S)));
  if(S.user==='Guest')DB.guest=d;else{const a=DB.acc[S.user.toLowerCase()];if(a)a.d=d}persist()}catch(e){}}
 function norm(){const D=DEF();for(const k of SKEYS)if(S[k]===undefined||S[k]===null)S[k]=D[k];S.med=Object.assign({rammer:0,catcher:0,puncher:0},S.med);for(const k in S.med)S.med[k]=Math.max(0,S.med[k]|0);
  if(!Array.isArray(S.badges))S.badges=[];if(!Array.isArray(S.icons))S.icons=[];if(typeof S.cl!=='object'||!S.cl)S.cl={};if(typeof S.own!=='object'||!S.own)S.own={};if(typeof S.eq!=='object'||!S.eq)S.eq={};
@@ -797,7 +797,7 @@ function fin(win){const g=G,k=g.p.cls;let t,st,gm=0,tr=0,md=0;
   if(win)md=9;else{gm=g.ko*4+ms*6+C.pc*4;tr=ms>0?0:-3}}
  else{if(g.score>S.best)S.best=g.score;const sw=g.wave>=SURV_WIN;t=sw?'Held the line!':'Crumpled up!';st=`Wave ${g.wave} · ${g.score} pts · best ${S.best}`+(sw?'':` · reach wave ${SURV_WIN} to win medals`);
   if(sw)md=3;else{gm=g.wave*3+(g.score/20|0);tr=g.wave>=3?g.wave:0}}
- const sts=S.st;sts.g++;if(g.mode==='surv'?md>0:!!win)sts.w++;sts.ko+=g.ko|0;sts.cap+=g.ctf?g.ctf.pc:0;
+ cloudPushT=0;const sts=S.st;sts.g++;if(g.mode==='surv'?md>0:!!win)sts.w++;sts.ko+=g.ko|0;sts.cap+=g.ctf?g.ctf.pc:0;
  const before=S.med[k];S.med[k]+=md;S.tro=Math.max(0,S.tro+tr);S.gems+=gm;save();
  g.s='over';mv.reset();aim.reset();app.classList.remove('playing');sfx(win||md?'win':'lose');
  const rdy=MIL[k].some(m=>before<m.at&&S.med[k]>=m.at);
@@ -1251,12 +1251,24 @@ $('#mapbtn').onclick=()=>{buildMaps();menu.classList.remove('on');$('#maps').cla
 $('#mp-back').onclick=()=>{$('#maps').classList.remove('on');menu.classList.add('on');sfx('ui')};
 const boxCls=b=>b==='catcher'?'netbox':b==='puncher'?'ringbox':'rambox';
 /* Tracks every registered account saved on this device. Each tab ranks by a different stat; tap a player for their full progress. */
+/* ---- online leaderboard (Firebase Realtime Database over plain HTTPS). Paste your database URL below, e.g. 'https://my-idk-default-rtdb.firebaseio.com'. Empty = this-device-only. ---- */
+const CLOUD='';
+let cloudRows=[],cloudPushT=0,cloudOk=null;
+const cKey=n=>encodeURIComponent(n.toLowerCase()).replace(/\./g,'%2E');
+function cloudPush(force){if(!CLOUD||S.user==='Guest'||typeof fetch!=='function')return;const n=Date.now();if(!force&&n-cloudPushT<20000)return;cloudPushT=n;
+ let tot=0;for(const k of CLS_KEYS)tot+=S.med[k]|0;
+ const b={n:S.user,ic:S.icon,bx:S.box,m:{r:S.med.rammer|0,c:S.med.catcher|0,p:S.med.puncher|0},tot,w:S.st.w|0,g:S.st.g|0,ko:S.st.ko|0,cap:S.st.cap|0,best:S.best|0,t:n};
+ try{fetch(CLOUD+'/lb/'+cKey(S.user)+'.json',{method:'PUT',body:JSON.stringify(b)}).then(r=>{cloudOk=r.ok},()=>{cloudOk=false})}catch(e){}}
+function cloudPull(){if(!CLOUD||typeof fetch!=='function')return;try{fetch(CLOUD+'/lb.json').then(r=>r.ok?r.json():Promise.reject()).then(o=>{cloudOk=true;cloudRows=Object.values(o||{}).filter(x=>x&&typeof x.n==='string'&&x.n.length<=20).map(x=>({name:x.n,key:x.n.toLowerCase(),d:{icon:x.ic,box:x.bx,med:{rammer:x.m&&x.m.r,catcher:x.m&&x.m.c,puncher:x.m&&x.m.p},best:x.best,st:{g:x.g,w:x.w,ko:x.ko,cap:x.cap}}}));
+  if(menu.classList.contains('on'))renderLLB();if($('#lboard').classList.contains('on'))renderLboard()}).catch(()=>{cloudOk=false})}catch(e){}}
+if(CLOUD){setInterval(cloudPull,10000);setTimeout(cloudPull,500)}
 const LBT=[{id:'med',n:'Medals'},{id:'win',n:'Wins'},{id:'cap',n:'Flags'},{id:'surv',n:'Survival'}];let lbTab='med',lbOpen='';
 function lbRows(tab='med'){let db=DB;if(canLS){try{const o=parseDB(localStorage.getItem(KEY));if(o)db=o}catch(e){}}
  const mk=(name,d,key)=>{const m=d.med||{},s=d.st||{};let tot=0,stars=0;for(const k of CLS_KEYS){const v=m[k]|0;tot+=v;stars+=MIL[k].filter(x=>v>=x.at).length}
   return{key,name,icon:d.icon||'excl',box:d.box||'',tot,stars,gems:d.gems|0,tro:d.tro|0,best:d.best|0,med:m,st:{g:s.g|0,w:s.w|0,ko:s.ko|0,cap:s.cap|0}}},rows=[];
  for(const key in db.acc){const a=db.acc[key];rows.push(mk(a.name,a.d||{},key))}
  if(S.user!=='Guest'){const key=S.user.toLowerCase(),r=mk(S.user,S,key),i=rows.findIndex(x=>x.key===key);if(i>=0)rows[i]=r;else rows.push(r)}
+ for(const c of cloudRows){const r=mk(c.name,c.d,c.key),i=rows.findIndex(x=>x.key===c.key);if(i<0)rows.push(r);else if(r.tot>rows[i].tot&&!(S.user!=='Guest'&&c.key===S.user.toLowerCase())){r.gems=rows[i].gems;r.tro=rows[i].tro;rows[i]=r}}
  const val=r=>lbVal(r,tab);
  rows.sort((a,b)=>val(b)-val(a)||b.tot-a.tot||b.stars-a.stars||b.gems-a.gems||a.name.localeCompare(b.name));return rows}
 const lbVal=(r,tab)=>tab==='win'?r.st.w:tab==='cap'?r.st.cap:tab==='surv'?r.best:r.tot,
@@ -1272,7 +1284,7 @@ function lbDetail(r){const d=document.createElement('div');d.className='lb-d';
 function buildLbTabs(){const t=$('#lb-tabs');t.innerHTML='';for(const x of LBT){const b=document.createElement('button');b.className='lb-tab'+(x.id===lbTab?' on':'');b.textContent=x.n;b.onclick=()=>{lbTab=x.id;buildLbTabs();renderLboard();sfx('ui')};t.appendChild(b)}}
 function renderLLB(){const rows=lbRows('med'),box=$('#llb-rows');if(!box)return;box.innerHTML='';$('#llb-n').textContent=rows.length?rows.length+(rows.length===1?' player':' players'):'';
  if(!rows.length){box.innerHTML='<div class="lb-none">No registered players yet. Sign up to claim the top spot!</div>';return}rows.slice(0,3).forEach((r,i)=>box.appendChild(lbRow(r,i,false)))}
-function renderLboard(){const L=$('#lbl-list');if(!L)return;if(!$('#lb-tabs').firstChild)buildLbTabs();const top=L.scrollTop;L.innerHTML='';const rows=lbRows(lbTab);if(!rows.length)L.innerHTML='<div class="lb-none">No registered players yet.</div>';
+function renderLboard(){const L=$('#lbl-list');if(!L)return;$('#lb-note').textContent=$('#lb-note').textContent.replace(/on (this device|every device)/,CLOUD?'on every device':'on this device');if(!$('#lb-tabs').firstChild)buildLbTabs();const top=L.scrollTop;L.innerHTML='';const rows=lbRows(lbTab);if(!rows.length)L.innerHTML='<div class="lb-none">No registered players yet.</div>';
  rows.forEach((r,i)=>{const w=document.createElement('div');w.className='lb-w';const row=lbRow(r,i,true,lbTab);row.onclick=()=>{lbOpen=lbOpen===r.key?'':r.key;renderLboard();sfx('ui')};w.appendChild(row);if(lbOpen===r.key)w.appendChild(lbDetail(r));L.appendChild(w)});L.scrollTop=top}
 $('#llb').onclick=()=>{renderLboard();menu.classList.remove('on');$('#lboard').classList.add('on');sfx('ui')};
 $('#lbk').onclick=()=>{$('#lboard').classList.remove('on');menu.classList.add('on');renderLLB();sfx('ui')};
