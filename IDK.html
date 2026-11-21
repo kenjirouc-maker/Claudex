@@ -249,6 +249,7 @@ h1::after{content:"";display:block;width:132px;height:10px;margin:8px auto 0;bac
 .lb-r.me{background:#F2C23033;border-radius:8px}.lb-none{padding:8px 4px;color:var(--soft);font-size:16px}
 .lbl-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px;padding:8px 4px 20px;touch-action:pan-y}
 .lbl-note{color:var(--soft);font-size:15px;text-align:center;padding:4px 10px 10px}
+.padf{outline:4px solid var(--accent)!important;outline-offset:3px;border-radius:12px}
 .lb-tabs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:6px 4px 2px}
 .lb-tab{padding:2px 14px 4px;border:1.6px solid var(--ink);border-radius:12px 8px 11px 9px;background:var(--sheet);box-shadow:var(--sh);font:700 22px/1.1 var(--title);color:var(--soft);transition:transform .15s}
 .lb-tab.on{background:var(--ink);color:var(--sheet)}.lb-tab:active{transform:scale(.95)}
@@ -739,7 +740,7 @@ function sfx(k,v=1){if(!AC||S.mute||v<.05)return;const n=performance.now();if(n-
  case'spawn':nzs(.35,200,900,.18*v,3);break;
  case'ult':nzs(.7,180,2600,.5*v,.9);tn(.55,110,440,.4*v,'sawtooth');tn(.45,330,660,.2*v,'triangle',.1);break
  case'ui':tn(.05,700,500,.12*v,'triangle');break}}catch(e){}}
-const buzz=ms=>{try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}};
+const buzz=ms=>{try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}padRumble(ms*2)};
 
 /* ---------- input ---------- */
 addEventListener('keydown',e=>{audio();if(e.code==='Space'){e.preventDefault();if(!e.repeat)fire({x:0,y:0})}else if(e.code==='Escape'||e.code==='KeyP')G.s==='play'?pause():G.s==='pause'&&resume();else if(e.code==='KeyM')mute();else if((e.code==='KeyQ'||e.code==='KeyE')&&!e.repeat&&G.s==='play')useUlt(G.p);keys.add(e.code)});
@@ -756,6 +757,45 @@ cv.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'||e.button!==2||
 app.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'||G.s!=='play'||!G.cam)return;
  const r=app.getBoundingClientRect();if(!app.classList.contains('pc')&&e.clientX>r.left+r.width*.5&&!aimEl.contains(e.target)&&!$('#mv').contains(e.target)&&!$('#ult').contains(e.target)){fire({x:0,y:0})}},{capture:false});
 function mute(){S.mute=!S.mute;save();$('#snd').classList.toggle('off',!!S.mute);if(!S.mute){audio();sfx('ui')}}
+
+/* ---------- controller (Gamepad API) ----------
+   in game: left stick moves, right stick aims (release to attack), RT/RB/A/X attack with auto-aim, LT/LB/Y ultimate, Start pauses.
+   menus: D-pad or left stick moves focus, A selects, B goes back. */
+const PAD={mx:0,my:0},PADHINT='Left stick moves · right stick aims, release to attack · RT or A auto-attacks · LB or Y ultimate · Start pauses';
+let padOn=false,padPrev=[],padAim=false,padLast={x:0,y:0},padFocus=null,padRep=0,padNavDir='';
+const padDz=(x,y,d=.22)=>{const l=Math.hypot(x,y);if(l<d)return[0,0];const k=Math.min(1,(l-d)/(1-d))/l;return[x*k,y*k]},
+padGet=()=>{try{const l=navigator.getGamepads?navigator.getGamepads():[];for(const g of l)if(g&&g.connected)return g}catch(e){}return null};
+function padRumble(ms){const g=padGet();try{const a=g&&(g.vibrationActuator||(g.hapticActuators&&g.hapticActuators[0]));if(a&&a.playEffect)a.playEffect('dual-rumble',{duration:ms,strongMagnitude:.6,weakMagnitude:.8})}catch(e){}}
+function padVisible(el,scr){if(!scr.contains(el)||el.hidden||el.disabled)return false;const r=el.getBoundingClientRect(),cs=getComputedStyle(el);return r.width>4&&r.height>4&&cs.visibility!=='hidden'&&cs.display!=='none'}
+function padSetFocus(el){if(padFocus)padFocus.classList.remove('padf');padFocus=el;if(el){el.classList.add('padf');try{el.scrollIntoView({block:'nearest',inline:'nearest'})}catch(e){}}}
+function padNav(dx,dy){const scr=[...document.querySelectorAll('.screen.on')].pop();if(!scr)return;
+ const els=[...scr.querySelectorAll('button,.cls-card,.lb-r,input')].filter(e=>padVisible(e,scr));if(!els.length)return;
+ if(!padFocus||!els.includes(padFocus)){const pl=els.find(e=>e.id==='play')||els.find(e=>e.classList.contains('go'))||els[0];padSetFocus(pl);return}
+ const a=padFocus.getBoundingClientRect(),ax=a.left+a.width/2,ay=a.top+a.height/2;let best=null,bs=1e9;
+ for(const e of els){if(e===padFocus)continue;const r=e.getBoundingClientRect(),vx=r.left+r.width/2-ax,vy=r.top+r.height/2-ay,al=vx*dx+vy*dy,pp=Math.abs(vx*dy-vy*dx);if(al<=2)continue;const sc=al+pp*2;if(sc<bs){bs=sc;best=e}}
+ if(best){padSetFocus(best);sfx('tick',.6)}}
+function padPoll(dt){const g=padGet();PAD.mx=PAD.my=0;if(!g){if(padOn){padOn=false;setHint()}return}
+ const b=i=>!!(g.buttons[i]&&g.buttons[i].pressed),pr=padPrev,edge=i=>b(i)&&!pr[i],ax=g.axes||[];
+ if(!padOn){padOn=true;setPC(true);toast('Controller connected')}
+ const[lx,ly]=padDz(ax[0]||0,ax[1]||0),[rx,ry]=padDz(ax[2]||0,ax[3]||0,.3);
+ const inPlay=G.s==='play'&&!!G.p&&app.classList.contains('playing');
+ if(inPlay){PAD.mx=lx;PAD.my=ly;if(b(14))PAD.mx-=1;if(b(15))PAD.mx+=1;if(b(12))PAD.my-=1;if(b(13))PAD.my+=1;
+  const rl=Math.hypot(rx,ry);
+  if(rl>.3&&(padAim||!aim.on)){padAim=true;aim.on=true;padLast={x:rx,y:ry};aim.v=padLast}
+  else if(padAim&&rl<=.3){padAim=false;aim.on=false;const v=padLast;aim.v={x:0,y:0};fire(v)}
+  if(edge(0)||edge(2)||edge(5)||edge(7))fire({x:0,y:0});
+  if(edge(3)||edge(4)||edge(6))useUlt(G.p);
+  if(edge(9))pause()}
+ else{if(padAim){padAim=false;aim.on=false;aim.v={x:0,y:0}}
+  if(edge(9)&&G.s==='pause')resume();
+  const scr=[...document.querySelectorAll('.screen.on')].pop();
+  if(scr){let dx=(b(15)?1:0)-(b(14)?1:0),dy=(b(13)?1:0)-(b(12)?1:0);if(!dx&&!dy){if(Math.abs(lx)>.55&&Math.abs(lx)>Math.abs(ly))dx=Math.sign(lx);else if(Math.abs(ly)>.55)dy=Math.sign(ly)}
+   const key=dx+','+dy;padRep-=dt;if(dx||dy){if(key!==padNavDir||padRep<=0){padNav(dx,dy);padRep=key!==padNavDir?.4:.14;padNavDir=key}}else{padNavDir='';padRep=0}
+   if(edge(0)){if(padFocus&&scr.contains(padFocus)&&padVisible(padFocus,scr)){if(padFocus.tagName==='INPUT')padFocus.focus();else padFocus.click()}else padNav(0,1)}
+   if(edge(1)){const bk=[...scr.querySelectorAll('#back,#cls-back,#cls-detback,#ms-back,#pf-back,#mp-back,#lbk,#home')].find(e=>padVisible(e,scr));if(bk){padFocus=null;bk.click()}}}}
+ padPrev=g.buttons.map(x=>!!x.pressed)}
+document.addEventListener('pointerdown',()=>{if(padFocus){padFocus.classList.remove('padf');padFocus=null}},{capture:true});
+addEventListener('gamepadconnected',()=>{try{padPoll(0)}catch(e){}});
 
 /* ---------- game state helpers ---------- */
 const retrig=(el,k)=>{el.classList.remove(k);void el.offsetWidth;el.classList.add(k)},
@@ -1007,7 +1047,7 @@ function updateTeamBtn(){const b=$('#teambtn');if(!b)return;b.hidden=mode!=='ctf
 
 function update(dt){const g=G,p=g.p;g.t+=dt;
  for(const f of g.f){f.bush=inBush(f);f.rev-=dt;f.h.push(g.t,f.x,f.y);while(f.h.length>6&&g.t-f.h[0]>.75)f.h.splice(0,3)}
- let mx=mv.v.x,my=mv.v.y;
+ let mx=mv.v.x+PAD.mx,my=mv.v.y+PAD.my;
  if(keys.has('KeyA')||keys.has('ArrowLeft'))mx--;if(keys.has('KeyD')||keys.has('ArrowRight'))mx++;
  if(keys.has('KeyW')||keys.has('ArrowUp'))my--;if(keys.has('KeyS')||keys.has('ArrowDown'))my++;
  const ml=Math.hypot(mx,my);if(ml>1){mx/=ml;my/=ml}
@@ -1349,7 +1389,7 @@ $('#home').onclick=()=>{G.s='menu';over.classList.remove('on');menu.classList.ad
 $('#snd').classList.toggle('off',!!S.mute);
 const PCM=(()=>{try{return matchMedia('(hover:hover) and (pointer:fine)').matches}catch(e){return false}})();
 let HINT='';
-function setHint(){const h=$('#hint');if(h)h.textContent=HINT+(mode==='ctf'?" · grab the enemy flag, bring it to your base (no attacking while you hold it)":'')}
+function setHint(){const h=$('#hint');if(h)h.textContent=(padOn?PADHINT:HINT)+(mode==='ctf'?" · grab the enemy flag, bring it to your base (no attacking while you hold it)":'')}
 function setPC(b){app.classList.toggle('pc',b);HINT=b?'WASD move · mouse aims · right click attacks · Q ultimate · hide in green scribbles':'Left stick moves · right stick aims · tap to auto-aim · ULT button · hide in green scribbles';setHint()}
 setPC(PCM);document.addEventListener('pointerdown',e=>{if(e.pointerType==='touch')setPC(false)},{capture:true});document.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'&&PCM&&!app.classList.contains('pc'))setPC(true)},{capture:true});
 function size(){const d=Math.min(devicePixelRatio||1,CAPD);vw=app.clientWidth||innerWidth||360;vh=app.clientHeight||innerHeight||640;cv.width=vw*d;cv.height=vh*d;c.setTransform(d,0,0,d,0,0);c.imageSmoothingEnabled=true;c.imageSmoothingQuality='high'}
@@ -1359,7 +1399,7 @@ try{const mq=matchMedia('(prefers-color-scheme:dark)');mq.addEventListener?mq.ad
 document.addEventListener('visibilitychange',()=>document.hidden&&pause());
 let slowT=0,adapt=0;
 try{document.fonts&&document.fonts.load&&Promise.all([document.fonts.load('20px "IDK Hand"'),document.fonts.load('700 20px "IDK Title"')]).then(()=>SPR.clear(),()=>{})}catch(e){}
-requestAnimationFrame(function f(ts){try{const raw=ts-last,dt=Math.min(.033,raw/1e3||0);last=ts;
+requestAnimationFrame(function f(ts){try{const raw=ts-last,dt=Math.min(.033,raw/1e3||0);last=ts;padPoll(dt);
  if(G.s==='play'&&raw<1000){slowT=raw>38?slowT+raw:Math.max(0,slowT-raw*.5);if(slowT>2500&&adapt<2){adapt++;slowT=0;if(adapt===1){CAPD=1;size()}else PCAP=110}}
  if(G.s==='play'){if(G.stop>0)G.stop-=dt;else{G.slow-=dt;update(dt*(G.slow>0?.35:1))}}
  G.tr=Math.max(0,(G.tr||0)-dt*1.7);if(G.p&&G.s!=='menu')render();if(menu.classList.contains('on')||shop.classList.contains('on'))drawCards(ts/1e3)}catch(e){console.error(e)}requestAnimationFrame(f)});
